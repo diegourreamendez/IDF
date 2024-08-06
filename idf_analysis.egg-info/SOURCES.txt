@@ -1,0 +1,6 @@
+setup.py
+idf_analysis.egg-info/PKG-INFO
+idf_analysis.egg-info/SOURCES.txt
+idf_analysis.egg-info/dependency_links.txt
+idf_analysis.egg-info/requires.txt
+idf_analysis.egg-info/top_level.txt

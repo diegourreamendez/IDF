@@ -1,0 +1,22 @@
+Metadata-Version: 2.1
+Name: idf_analysis
+Version: 0.1
+Summary: A library for performing Intensity-Duration-Frequency (IDF) analysis on rainfall data
+Home-page: https://github.com/diegourreamendez/IDF
+Author: Diego Urrea
+Author-email: urread@uninca.es
+License: MIT
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: matplotlib
+Requires-Dist: seaborn
+Requires-Dist: scipy
+Requires-Dist: statsmodels
+Requires-Dist: scikit-learn
+Requires-Dist: fitter
+
+IDFAnalysis is a class that encapsulates methods for calculating annual maximum intensities, fitting statistical models, generating IDF curves, and plotting results.

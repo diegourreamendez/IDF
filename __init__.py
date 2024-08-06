@@ -1,0 +1,1 @@
+from .idf_curves import MiClase

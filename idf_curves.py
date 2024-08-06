@@ -433,7 +433,7 @@ class IDFAnalysis:
             
             return IDF_curve_fit, fig
         
-        return synth_IDF.T
+        return IDF_curve_fit
     
     def calculate_goodness_of_fit(self, station, IDF_type=None, method=None):
         """
