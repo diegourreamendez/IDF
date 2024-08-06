@@ -1,1 +1,1 @@
-from .idf_curves import MiClase
+from .idf_curves import IDFAnalysis
