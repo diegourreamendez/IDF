@@ -435,7 +435,7 @@ class IDFAnalysis:
         
         return IDF_curve_fit
     
-    def calculate_goodness_of_fit(self, station, IDF_type=None, method=None):
+    def __calculate_goodness_of_fit(self, station, IDF_type=None, method=None):
         """
         Calculate goodness of fit metrics for the IDF curves, including a global fit.
         
@@ -496,3 +496,42 @@ class IDFAnalysis:
         metrics_df.index.name = 'Return_Period'
         
         return metrics_df
+    
+    def goodness_of_fit(self, station, method='all'):
+        """
+        Compare the goodness of fit for different IDF types using curve_fit and least_squares methods.
+
+        Args:
+            station (str): Station to analyze.
+            method (str): Method to use for comparison. Options are 'curve_fit', 'least_squares', 'all'.
+
+        Returns:
+            pd.DataFrame: DataFrame containing R², RMSE, and MAE for each IDF type and method.
+        """
+        IDF_types = ['IDF_typeI', 'IDF_typeII', 'IDF_typeIII', 'IDF_typeIV', 'IDF_typeV']
+        results_goodness_curve_fit = pd.DataFrame(index=IDF_types, columns=['R2', 'RMSE', 'MAE'])
+        results_goodness_least_squares = pd.DataFrame(index=IDF_types, columns=['R2', 'RMSE', 'MAE'])
+
+        if method in ['curve_fit', 'all']:
+            for IDF_type in IDF_types:
+                curve_fit_results = self.__calculate_goodness_of_fit(station, IDF_type=IDF_type, method='curve_fit').loc['Global'].values
+                results_goodness_curve_fit.loc[IDF_type] = curve_fit_results
+            results_goodness_curve_fit['method'] = 'curve_fit'
+
+        if method in ['least_squares', 'all']:
+            for IDF_type in IDF_types:
+                least_squares_results = self.__calculate_goodness_of_fit(station, IDF_type=IDF_type, method='least_squares').loc['Global'].values
+                results_goodness_least_squares.loc[IDF_type] = least_squares_results
+            results_goodness_least_squares['method'] = 'least_squares'
+
+        if method == 'curve_fit':
+            results_goodness = results_goodness_curve_fit.copy()
+        elif method == 'least_squares':
+            results_goodness = results_goodness_least_squares.copy()
+        elif method == 'all':
+            results_goodness = pd.concat([results_goodness_curve_fit, results_goodness_least_squares])
+            results_goodness.sort_values(by='R2', ascending=False, inplace=True)
+        else:
+            raise ValueError("Method must be 'curve_fit', 'least_squares', or 'all'")
+
+        return results_goodness

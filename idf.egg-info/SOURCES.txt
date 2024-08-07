@@ -1,0 +1,7 @@
+README.md
+setup.py
+idf.egg-info/PKG-INFO
+idf.egg-info/SOURCES.txt
+idf.egg-info/dependency_links.txt
+idf.egg-info/requires.txt
+idf.egg-info/top_level.txt

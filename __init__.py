@@ -1,1 +1,1 @@
-from .idf_curves import IDFAnalysis
+from .idf_analysis import IDFAnalysis
