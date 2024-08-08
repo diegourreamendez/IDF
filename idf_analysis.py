@@ -15,6 +15,7 @@ from Julia_Genextreme import Julia_Genextreme
 from scipy.optimize import curve_fit
 import scipy.stats as stats
 from math import ceil
+import math
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 import warnings
@@ -116,7 +117,7 @@ class IDFAnalysis:
                     # Assuming Julia_Genextreme is a function that fits the parameters
                     Model_gev_fit_julia = Julia_Genextreme(data)
                     params = Model_gev_fit_julia.fit().values[0]
-                    
+
                     # Create a scipy model with parameters calculated by Julia
                     modelos_gage[duracion] = stats.genextreme(*params)
             
@@ -312,6 +313,23 @@ class IDFAnalysis:
     def IDF_typeV_least_squares(D, a, b, c):
         """IDF equation type V for least squares."""
         return a / (D**c)
+    
+    @staticmethod
+    def IDF_typeI_pot_reg(k, m, n, T, t):
+        """
+        Calculate the intensity of rainfall based on the given formula.
+
+        Parameters:
+        k (float): Regression coefficient.
+        m (float): Exponent for return period.
+        n (float): Exponent for duration.
+        T (float): Return period.
+        t (float): Duration in minutes.
+
+        Returns:
+        float: Calculated rainfall intensity.
+        """
+        return (k * (T ** m)) / (t ** n)
 
     def fit_multi_IDF_curves(self, x, params, func):
         """
@@ -391,7 +409,7 @@ class IDFAnalysis:
         Intensidad_puntual = station_idf.melt()['value'].values
         
         # From 15 minutes to 24 hours
-        Duracion_lluvia = np.linspace(0.01, self.Durations.max(), 1000)
+        Duracion_lluvia = np.linspace(0.0833333, self.Durations.max(), 500)
         # Include in fit serie all durations that are not already in the IDF curve
         Duracion_lluvia = np.unique(np.concatenate((Duracion_lluvia, self.Durations)))
         
@@ -409,8 +427,73 @@ class IDFAnalysis:
             ajuste = least_squares(self.residuo, x0=1.e-3*np.ones(15), args=(station_idf, self.least_squares_funcs[IDF_type]))
             synth_IDF = self.construct_multi_IDFs(station_idf.index, Duracion_lluvia, ajuste.x, self.least_squares_funcs[IDF_type])
             IDF_curve_fit = synth_IDF.T
+
+        elif method == 'potential_regression':
+
+            table = self.Gages_idf[station].T.sort_index(ascending=False)
+            table['min'] = table.index*60
+            # Función auxiliar para calcular d y n para un periodo específico
+            def calcular_dn(x, y):
+                n = len(x)
+                ln_x = [math.log(xi) for xi in x]
+                ln_y = [math.log(yi) for yi in y]
+                sum_ln_x = sum(ln_x)
+                sum_ln_y = sum(ln_y)
+                sum_ln_x_ln_y = sum(lnxi * lnyi for lnxi, lnyi in zip(ln_x, ln_y))
+                sum_ln_x_squared = sum(lnxi**2 for lnxi in ln_x)
+                
+                numerador = (n * sum_ln_x_ln_y) - (sum_ln_x * sum_ln_y)
+                denominador = (n * sum_ln_x_squared) - (sum_ln_x**2)
+                n_value = numerador / denominador
+                ln_d = (sum_ln_y - n_value * sum_ln_x) / n
+                d_value = math.exp(ln_d)
+                
+                return d_value, n_value
+
+            # Preparar el DataFrame de resultados
+            resultados = []
+
+            # Calcular d y n para cada periodo
+            for periodo in self.Return_period:
+                x = table['min'].values
+                y = table[periodo].values
+                d, n = calcular_dn(x, y)
+                resultados.append({
+                    'Return_period': int(periodo),
+                    'regression_coef_[d]': d,
+                    'regression_coef_[n]': n
+                })
+
+            # Crear DataFrame de resultados
+            df_resultados = pd.DataFrame(resultados)
+            
+            # Calcular promedios
+            promedios = df_resultados[['regression_coef_[d]', 'regression_coef_[n]']].mean()
+            promedios_df = pd.DataFrame(promedios).T
+            promedios_df['Return_period'] = 'Promedio'
+            
+            # Combinar resultados y promedios
+            df_summary = pd.concat([df_resultados, promedios_df]).reset_index(drop=True)
+
+            K, m = calcular_dn(df_summary['Return_period'][:-1], df_summary['regression_coef_[d]'][:-1])
+            n = df_summary['regression_coef_[n]'][:-1].mean()*-1
+            durations = np.round(Duracion_lluvia*60, 4)
+
+            # Create an empty DataFrame with frequencies as index and durations as columns
+            intensity_df = pd.DataFrame(index=self.Return_period, columns=durations)
+
+            # Calculate the intensities and fill the DataFrame
+            for T in self.Return_period:
+                for t in durations:
+                    intensity_df.loc[T, t] = getattr(self, 'IDF_typeI_pot_reg')(K, m, n, T, t)
+
+            intensity_df = intensity_df.T
+            intensity_df.index = intensity_df.index/60
+            
+            IDF_curve_fit = intensity_df.copy()
+            
         else:
-            raise ValueError("Method must be 'curve_fit' or 'least_squares'")
+            raise ValueError("Method must be 'curve_fit' or 'least_squares' or 'potential_regression")
         
         if plot:
             # Create plot of the results
@@ -423,7 +506,7 @@ class IDFAnalysis:
                 ax.scatter(self.Durations, co.values, color=colores[idx], label=f'T = {tr} years (obs)', s=30, alpha=0.7)
                 ax.plot(Duracion_lluvia, cs, color=colores[idx], linewidth=2)
             
-            ax.set_xlim(0, 24)
+            ax.set_xlim(0.0833333, 24)
             ax.set_xlabel('Duration (h)', fontsize=14)
             ax.set_ylabel('Intensity (mm/h)', fontsize=14)
             ax.set_title(f'IDF Curves - Station {station}', fontsize=16)
