@@ -30,7 +30,7 @@ class IDFAnalysis:
     fitting statistical models, generating IDF curves, and plotting results.
     """
 
-    def __init__(self, historic_hourly, Durations, Return_periods, distribution='genextreme', model='scipy_stats', method='curve_fit', IDF_type='IDF_typeI'):
+    def __init__(self, historic_hourly, Durations, Return_periods, distribution='genextreme', model='scipy_stats', method='curve_fit', IDF_type='IDF_typeI', scale = 'normal'):
         """
         Initialize the IDFAnalysis class.
         
@@ -52,20 +52,12 @@ class IDFAnalysis:
         self.model = model
         self.method = method
         self.IDF_type = IDF_type
+        self.scale = scale
         
         # Perform initial calculations
         self._calculate_intensity_annual_max()
         self._fit_models()
         self._calculate_idf()
-
-        # Dictionary to map IDF_type to their corresponding least_squares functions
-        self.least_squares_funcs = {
-            'IDF_typeI': self.IDF_typeI_least_squares,
-            'IDF_typeII': self.IDF_typeII_least_squares,
-            'IDF_typeIII': self.IDF_typeIII_least_squares,
-            'IDF_typeIV': self.IDF_typeIV_least_squares,
-            'IDF_typeV': self.IDF_typeV_least_squares
-        }
         
     def _calculate_intensity_annual_max(self):
         """
@@ -290,32 +282,7 @@ class IDFAnalysis:
         return I
     
     @staticmethod
-    def IDF_typeI_least_squares(D, a, b, c):
-        """IDF equation type I for least squares."""
-        return a / (D + b)**2
-
-    @staticmethod
-    def IDF_typeII_least_squares(D, a, b, c):
-        """IDF equation type II for least squares."""
-        return a / (D**b + c)
-
-    @staticmethod
-    def IDF_typeIII_least_squares(D, a, b, c):
-        """IDF equation type III for least squares."""
-        return a / (D + c)**2
-
-    @staticmethod
-    def IDF_typeIV_least_squares(D, a, b, c):
-        """IDF equation type IV for least squares."""
-        return a / (D**c + c)
-
-    @staticmethod
-    def IDF_typeV_least_squares(D, a, b, c):
-        """IDF equation type V for least squares."""
-        return a / (D**c)
-    
-    @staticmethod
-    def IDF_typeI_pot_reg(k, m, n, T, t):
+    def IDF_typeV_pot_reg(T, D, d, e, b):
         """
         Calculate the intensity of rainfall based on the given formula.
 
@@ -329,7 +296,7 @@ class IDFAnalysis:
         Returns:
         float: Calculated rainfall intensity.
         """
-        return (k * (T ** m)) / (t ** n)
+        return (d * (T ** e)) / (D ** b)
 
     def fit_multi_IDF_curves(self, x, params, func):
         """
@@ -345,7 +312,9 @@ class IDFAnalysis:
         """
         y = pd.DataFrame().reindex_like(x)
         for idx, T in enumerate(x.index):
-            y.loc[T, :] = func(x.loc[T].index.values.astype("float64"), params[idx+1], params[0], params[idx+8])
+            # Apply IDF_type to each row
+            for D in x.columns:
+                y.loc[T, D] = func([T, D], params[0], params[idx+1], params[idx+8], params[idx+15])
         return (y-x).values.reshape(-1)**2
     
     def residuo(self, params, IDF, func):
@@ -360,7 +329,15 @@ class IDFAnalysis:
         Returns:
             np.array: Squared residuals between fitted and observed values.
         """
-        return self.fit_multi_IDF_curves(IDF, params, func)
+        if self.scale == 'log':
+            # Apply the logarithmic transformation to the observed IDF values
+            log_IDF = np.log(IDF)
+            return self.fit_multi_IDF_curves(log_IDF, params, func)
+        elif self.scale == 'normal':
+            # Work directly with the original values if the scale is normal
+            return self.fit_multi_IDF_curves(IDF, params, func)
+        else:
+            raise ValueError("The 'scale' parameter must be 'normal' or 'log'")
     
     def construct_multi_IDFs(self, Ts, Ds, params, func):
         """
@@ -377,8 +354,23 @@ class IDFAnalysis:
         """
         res = pd.DataFrame(index=Ts, columns=Ds)
         for idx, T in enumerate(res.index):
-            res.loc[T,:] = func(Ds, params[idx+1], params[0], params[idx+8])
-        return res
+            for D in res.columns:
+                res.loc[T, D] = func([T, D], params[0], params[idx+1], params[idx+8], params[idx+15])
+        
+        # Convert all values to numeric
+        res_numeric = res.apply(pd.to_numeric, errors='coerce')
+        
+        # Handle based on the specified scale
+        if self.scale == 'log':
+            # Apply np.exp() to revert to the original scale from logarithmic
+            res_numeric = np.exp(res_numeric)
+        elif self.scale == 'normal':
+            # No additional transformation needed if the scale is normal
+            pass
+        else:
+            raise ValueError("The 'scale' parameter must be 'normal' or 'log'")
+        
+        return res_numeric
 
     def IDF_fit(self, station, IDF_type=None, method=None, plot=True):
         """
@@ -389,7 +381,7 @@ class IDFAnalysis:
             IDF_type (str): Type of IDF equation to use.
             method (str): Fitting method to use ('curve_fit' or 'least_squares').
             plot (bool): Whether to generate a plot of the results.
-        
+
         Returns:
             pd.DataFrame: Fitted IDF curve data.
             matplotlib.figure.Figure: Generated figure (if plot=True).
@@ -407,7 +399,6 @@ class IDFAnalysis:
         
         # Intensity
         Intensidad_puntual = station_idf.melt()['value'].values
-        
         # From 15 minutes to 24 hours
         Duracion_lluvia = np.linspace(0.0833333, self.Durations.max(), 500)
         # Include in fit serie all durations that are not already in the IDF curve
@@ -424,8 +415,10 @@ class IDFAnalysis:
             
         elif method == 'least_squares':
             # Fit curve using least_squares
-            ajuste = least_squares(self.residuo, x0=1.e-3*np.ones(15), args=(station_idf, self.least_squares_funcs[IDF_type]))
-            synth_IDF = self.construct_multi_IDFs(station_idf.index, Duracion_lluvia, ajuste.x, self.least_squares_funcs[IDF_type])
+            num_periods = len(self.Return_period)
+            num_parameters = 4 # number parameters to fit in idf equations
+            ajuste = least_squares(self.residuo, x0=1.e-3*np.ones(num_periods*num_parameters), args=(station_idf, getattr(self, IDF_type)))
+            synth_IDF = self.construct_multi_IDFs(station_idf.index, Duracion_lluvia, ajuste.x, getattr(self, IDF_type))
             IDF_curve_fit = synth_IDF.T
 
         elif method == 'potential_regression':
@@ -475,8 +468,8 @@ class IDFAnalysis:
             # Combinar resultados y promedios
             df_summary = pd.concat([df_resultados, promedios_df]).reset_index(drop=True)
 
-            K, m = calcular_dn(df_summary['Return_period'][:-1], df_summary['regression_coef_[d]'][:-1])
-            n = df_summary['regression_coef_[n]'][:-1].mean()*-1
+            d, e = calcular_dn(df_summary['Return_period'][:-1], df_summary['regression_coef_[d]'][:-1])
+            b = df_summary['regression_coef_[n]'][:-1].mean()*-1
             durations = np.round(Duracion_lluvia*60, 4)
 
             # Create an empty DataFrame with frequencies as index and durations as columns
@@ -485,7 +478,7 @@ class IDFAnalysis:
             # Calculate the intensities and fill the DataFrame
             for T in self.Return_period:
                 for t in durations:
-                    intensity_df.loc[T, t] = getattr(self, 'IDF_typeI_pot_reg')(K, m, n, T, t)
+                    intensity_df.loc[T, t] = getattr(self, 'IDF_typeV_pot_reg')(T, t, d, e, b)
 
             intensity_df = intensity_df.T
             intensity_df.index = intensity_df.index/60
@@ -506,7 +499,7 @@ class IDFAnalysis:
                 ax.scatter(self.Durations, co.values, color=colores[idx], label=f'T = {tr} years (obs)', s=30, alpha=0.7)
                 ax.plot(Duracion_lluvia, cs, color=colores[idx], linewidth=2)
             
-            ax.set_xlim(0.0833333, 24)
+            ax.set_xlim(0.0833333, self.Durations.max())
             ax.set_xlabel('Duration (h)', fontsize=14)
             ax.set_ylabel('Intensity (mm/h)', fontsize=14)
             ax.set_title(f'IDF Curves - Station {station}', fontsize=16)
